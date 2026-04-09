@@ -9,6 +9,7 @@ import os
 import cv2
 import numpy as np
 from imutils.video import FPS
+import torch
 from ultralytics import YOLO  # pip install ultralytics
 
 # ---------- CONFIG ----------
@@ -81,7 +82,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, default="yolov8n.pt", help="YOLOv8 weights or model (local path or model name)")
     p.add_argument("--source", type=str, default="0", help="Video source (0 for webcam or path to video)")
-    p.add_argument("--device", type=str, default="0", help="Computation device for ultralytics (0 or 'cpu')")
+    p.add_argument("--device", type=str, default="cpu", help="Computation device for ultralytics (0 or 'cpu')")
     p.add_argument("--buffer_seconds", type=int, default=BUFFER_SECONDS)
     p.add_argument("--fps", type=int, default=FPS_TARGET)
     return p.parse_args()
@@ -91,7 +92,11 @@ def main():
     # load model
     print(f"[+] Loading model {args.model} on device {args.device} ...")
     model = YOLO(args.model)
-    model.to(args.device)
+    if args.device == "mps" and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    model.to(device)
 
     # open video source
     source = int(args.source) if args.source.isnumeric() else args.source
@@ -123,16 +128,16 @@ def main():
         frame_buffer.append(orig_frame)
         # run detection (resize to make it faster for demo)
         # ultralytics model automatically resizes input
-        results = model(orig_frame, conf=MIN_CONFIDENCE, verbose=False)
+        results = model(orig_frame, conf=MIN_CONFIDENCE, device=device, verbose=False)
         # results is a list; take first result object
         r = results[0]
         boxes = r.boxes  # Boxes object
         # Parse detections into list: (label_name, conf, bbox)
         detections = []
         for b in boxes:
-            cls_id = int(b.cls.cpu().numpy().item())
-            conf = float(b.conf.cpu().numpy().item())
-            xyxy = b.xyxy.cpu().numpy().astype(int).tolist()[0]  # [x1,y1,x2,y2]
+            cls_id = int(b.cls)
+            conf = float(b.conf)
+            xyxy = list(map(int, b.xyxy[0]))  # [x1,y1,x2,y2]
             # get label name (model.names)
             label_name = r.names.get(cls_id, str(cls_id))
             detections.append((label_name, conf, xyxy))
